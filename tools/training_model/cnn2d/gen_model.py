@@ -1,10 +1,10 @@
 import numpy as np
-from tensorflow.python.keras.layers import Conv2D
-from tensorflow.python.keras.layers import Dense
-from tensorflow.python.keras.layers import Dropout
-from tensorflow.python.keras.layers import Flatten
-from tensorflow.python.keras.layers import MaxPooling2D
-from tensorflow.python.keras.models import Sequential
+# from tensorflow.python.keras.layers import Conv2D
+# from tensorflow.python.keras.layers import Dense
+# from tensorflow.python.keras.layers import Dropout
+# from tensorflow.python.keras.layers import Flatten
+# from tensorflow.python.keras.layers import MaxPooling2D
+# from tensorflow.python.keras.models import Sequential
 from tqdm.auto import tqdm
 
 from tools.constant import CNN2D_CONFIG
@@ -31,6 +31,7 @@ class GenModel:
         activation_fcts=CNN2D_CONFIG["activation_fcts"],
         optimizers=CNN2D_CONFIG["optimizers"],
         losses=CNN2D_CONFIG["losses"],
+        input_shape_list=None,
     ):
         self.input_shape_lower = input_shape_lower
         self.input_shape_upper = input_shape_upper
@@ -59,6 +60,8 @@ class GenModel:
         self.loss_pick = losses if losses is not None else self.losses.copy()
         self.padding_pick = paddings if paddings is not None else self.paddings.copy()
 
+        self.input_shape_list = input_shape_list
+
     @staticmethod
     def nothing(x):
         return x
@@ -72,7 +75,10 @@ class GenModel:
             dense_layer_num_upper=self.dense_layer_num_upper,
         )
         layer_orders = cnn_rules.gen_cnn_rule()
-        input_shape = np.random.randint(self.input_shape_lower, self.input_shape_upper)
+        if self.input_shape_list:
+            input_shape = np.random.choice(self.input_shape_list, 1)[0]
+        else:
+            input_shape = np.random.randint(self.input_shape_lower, self.input_shape_upper)
         input_channels = np.random.choice(self.input_channels, 1)[0]
         bm = BuildModel(
             DEFAULT_INPUT_SHAPE=(input_shape, input_shape, input_channels),
@@ -94,24 +100,24 @@ class GenModel:
             (int(input_shape), int(input_shape), int(input_channels)),
         )
 
-    @staticmethod
-    def build_cnn2d_model(kwargs_list, layer_orders):
-        cnn2d = Sequential()
-        for i, lo in enumerate(layer_orders):
-            kwargs = kwargs_list[i]
-            if lo == "Dense":
-                cnn2d.add(Dense(**kwargs))
-            elif lo == "Conv2D":
-                cnn2d.add(Conv2D(**kwargs))
-            elif lo == "MaxPooling2D":
-                cnn2d.add(MaxPooling2D(**kwargs))
-            elif lo == "Dropout":
-                cnn2d.add(Dropout(**kwargs))
-            elif lo == "Flatten":
-                cnn2d.add(Flatten())
-        kwargs = kwargs_list[-1]
-        cnn2d.compile(metrics=["accuracy"], **kwargs["Compile"])
-        return cnn2d
+    # @staticmethod
+    # def build_cnn2d_model(kwargs_list, layer_orders):
+    #     cnn2d = Sequential()
+    #     for i, lo in enumerate(layer_orders):
+    #         kwargs = kwargs_list[i]
+    #         if lo == "Dense":
+    #             cnn2d.add(Dense(**kwargs))
+    #         elif lo == "Conv2D":
+    #             cnn2d.add(Conv2D(**kwargs))
+    #         elif lo == "MaxPooling2D":
+    #             cnn2d.add(MaxPooling2D(**kwargs))
+    #         elif lo == "Dropout":
+    #             cnn2d.add(Dropout(**kwargs))
+    #         elif lo == "Flatten":
+    #             cnn2d.add(Flatten())
+    #     kwargs = kwargs_list[-1]
+    #     cnn2d.compile(metrics=["accuracy"], **kwargs["Compile"])
+    #     return cnn2d
 
     def generate_model_configs(self, num_model_data=1000, progress=True):
         model_configs = []

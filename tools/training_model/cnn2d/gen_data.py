@@ -14,6 +14,9 @@ from tools.constant import TIME_COLUMNS
 from tools.training_model.cnn2d.gen_model import GenModel
 from tools.training_model.util.time_his import TimeHistoryBasic
 
+import subprocess
+import json
+import sys
 
 class GenData:
     def __init__(
@@ -40,61 +43,83 @@ class GenData:
         self.losses = losses
         self.paddings = paddings
 
-    def get_train_data(self, progress=True, verbose=False):
+    def get_train_data(self, progress=True, verbose=False, file_name=None):
         model_data = []
-        model_configs = []
         if progress:
             loop_fun = tqdm
         else:
             loop_fun = GenModel.nothing
-        for info_list in self.model_configs:
-            model_configs.append(info_list.copy())
+        #for info_list in self.model_configs:
+        #    model_configs.append(info_list.copy())
+        model_configs = [info_list.copy() for info_list in self.model_configs]            
+        # open file in write mode
+        #with open(r'test.txt', 'w') as fp:
+        if file_name:
+            open(file_name, "w").close()
         for model_config_list in loop_fun(model_configs):
-            with tf.compat.v1.Session() as sess:
-                kwargs_list = model_config_list[0]
-                layer_orders = model_config_list[1]
-                input_shape = model_config_list[2]
-                model = GenModel.build_cnn2d_model(kwargs_list, layer_orders)
-                batch_size = sample(self.batch_sizes, 1)[0]
-                batch_size_data_batch = []
-                batch_size_data_epoch = []
-                out_shape = model.get_config()["layers"][-1]["config"]["units"]
-                x = np.ones((batch_size, *input_shape), dtype=np.float32)
-                y = np.ones((batch_size, out_shape), dtype=np.float32)
-                for _ in range(self.trials):
-                    time_callback = TimeHistoryBasic()
-                    model.fit(
-                        x,
-                        y,
-                        epochs=self.epochs,
-                        batch_size=batch_size,
-                        callbacks=[time_callback],
-                        verbose=verbose,
-                    )
-                    times_batch = np.array(time_callback.batch_times) * 1000
-                    times_epoch = np.array(time_callback.epoch_times) * 1000
-                    batch_size_data_batch.extend(times_batch)
-                    batch_size_data_epoch.extend(times_epoch)
-            sess.close()
-            batch_times_truncated = batch_size_data_batch[self.truncate_from :]
-            epoch_times_truncated = batch_size_data_epoch[self.truncate_from :]
-            recovered_time = [
-                np.median(batch_times_truncated)
-            ] * self.truncate_from + batch_times_truncated
-
-            model_config_list.append(
-                {
+            batch_size = sample(self.batch_sizes, 1)[0]
+            input_shape = model_config_list[2]
+            try:
+                # Serialize the data structure to JSON
+                params_json = json.dumps({
+                    "model_config_list": model_config_list,
                     "batch_size": batch_size,
-                    "batch_time_ms": np.median(batch_times_truncated),
-                    "epoch_time_ms": np.median(epoch_times_truncated),
-                    "setup_time_ms": np.sum(batch_size_data_batch)
-                    - sum(recovered_time),
-                    "input_dim": input_shape,
-                }
-            )
-            model_data.append(model_config_list)
-        return model_data
+                    "trials" : self.trials,
+                    "epochs" : self.epochs,
+                    "verbose" : verbose
+                })
+                result = subprocess.run(
+                    ["python", "training_cnn2d_subprocess.py", params_json],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    #stderr=sys.stderr, stdout=sys.stdout, # For debugging purposes
+                )
+                # Parse the JSON output from the subprocess
+                result_values = json.loads(result.stdout)
+                batch_size_data_batch = result_values["batch_size_data_batch"]
+                batch_size_data_epoch = result_values["batch_size_data_epoch"]
 
+                batch_times_truncated = batch_size_data_batch[self.truncate_from :]
+                epoch_times_truncated = batch_size_data_epoch[self.truncate_from :]
+                recovered_time = [
+                    np.median(batch_times_truncated)
+                ] * self.truncate_from + batch_times_truncated
+                
+                model_config_list.append(
+                    {
+                        "batch_size": batch_size,
+                        "batch_time_ms": np.median(batch_times_truncated),
+                        "epoch_time_ms": np.median(epoch_times_truncated),
+                        "setup_time_ms": np.sum(batch_size_data_batch)
+                        - sum(recovered_time),
+                        "input_dim": input_shape,
+                    }
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"Subprocess failed with return code {e.returncode}")
+                # Uncomment for debbuging
+                # print(f"Subprocess failed: {e}")
+                # print("Standard Output:")
+                # print(e.stdout)
+                # print("Standard Error:")
+                # print(e.stderr)
+                # Handle the failure gracefully
+                model_config_list.append(
+                    {
+                        "batch_size": batch_size,
+                        "batch_time_ms": None,
+                        "epoch_time_ms": None,
+                        "setup_time_ms": None,
+                        "input_dim": input_shape,
+                    }
+                )
+            model_data.append(model_config_list)
+            if file_name:
+                with open(file_name, 'a') as fp:
+                    fp.write(f"{model_config_list}\n")
+        return model_data
+    
     def convert_config_data(
         self,
         model_data,
@@ -237,3 +262,72 @@ class GenData:
                 scaled_model_dfs.append(scaled_temp_df)
             return scaled_model_dfs, time_df, scaler
         return model_data_dfs, time_df, None
+
+    @staticmethod
+    def model_data_to_dataframe(model_data, total_layers=29):
+        data = {
+            'batch_size': [],
+            'input_shape': [],
+            'optimizer': [],
+            'loss': [],
+            'channels': [],
+            'batch_time_ms': [],
+            'epoch_time_ms': [],
+            'setup_time_ms': [],
+        }
+
+        for i in range(total_layers):
+            data[f'layer_size_{i}'] = []
+            data[f'layer_type_{i}'] = []
+            data[f'activation_type_{i}'] = []
+            data[f'kernel_size_{i}'] = []
+            data[f'padding_{i}'] = []
+            data[f'strides_{i}'] = []
+
+        # Iterate over models
+        for row in model_data:
+            data['batch_size'].append(row[3]['batch_size'])
+            data['input_shape'].append(row[2][0])# data['input_shape'].append(row[2])
+            data['optimizer'].append(row[0][-1]["Compile"]["optimizer"])
+            data['loss'].append(row[0][-1]["Compile"]["loss"])
+            data['channels'].append(row[2][-1])
+            data['batch_time_ms'].append(row[3]["batch_time_ms"])
+            data['epoch_time_ms'].append(row[3]["epoch_time_ms"])
+            data['setup_time_ms'].append(row[3]["setup_time_ms"])
+
+            for i in range(total_layers):
+                if i < len(row[1]):
+                    data[f'layer_type_{i}'].append(row[1][i])
+                    if 'filters' in row[0][i]:
+                        data[f'layer_size_{i}'].append(row[0][i]['filters'])
+                    elif 'units' in row[0][i]:
+                        data[f'layer_size_{i}'].append(row[0][i]['units'])
+                    else:
+                        data[f'layer_size_{i}'].append(0)
+                    data[f'activation_type_{i}'].append(row[0][i].get('activation', None))
+                    data[f'kernel_size_{i}'].append(row[0][i].get('kernel_size', 0))
+                    data[f'padding_{i}'].append(row[0][i].get('padding', None))
+                    if 'strides' in row[0][i]:
+                        data[f'strides_{i}'].append(row[0][i]['strides'][0]*row[0][i]['strides'][1])
+                    else:
+                        data[f'strides_{i}'].append(0)
+                else:
+                    # If i is greater than or equal to the number of layers, append None
+                    for suffix in ['layer_type', 'activation_type', 'padding']:
+                        data[f'{suffix}_{i}'].append(None)
+                    for suffix in ['layer_size', 'kernel_size', 'strides']:
+                        data[f'{suffix}_{i}'].append(0)
+
+        model_data_df = pd.DataFrame(data)
+        return model_data_df
+    
+    @staticmethod
+    def model_data_file_to_dataframe(file_path, total_layers=29):
+        import ast
+        parsed_data = []
+        with open(file_path, 'r') as file:
+            for line in file:
+                # Remove leading and trailing whitespaces, and convert to Python object
+                row_data = ast.literal_eval(line.strip())
+                parsed_data.append(row_data)
+        return GenData.model_data_to_dataframe(parsed_data, total_layers)

@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ENV = os.getenv("ENV", "production")
+IS_SUDOER = False
 
 print(f"Running {ENV} environment")
 

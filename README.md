@@ -749,3 +749,11 @@ put python steps here
 ```
 
 </details>
+
+# Additions
+
+- In the function get_train_data of cnn2d and cnn_pretrained the models are executed in a subprocess. Adding a fault-tolerance layer to the program.
+- The gen_data files of cnn_pretrained and cnn2d can generate a dataframe with the implemented functions:
+	- for cnn2d: `model_data_to_dataframe` and `model_data_file_to_dataframe`.
+	- for cnn_pretrained: `convert_train_data_to_dataframe`
+- Now a list of shapes can be passed as a parameter to generate models with cnn2d with `input_shape_list`. If passed its going to generate to select a random input shape from the list. Otherwise, it will generate with the `input_shape_lower` and `input_shape_upper` parameters.

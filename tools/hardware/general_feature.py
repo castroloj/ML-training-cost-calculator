@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess as sp
+from tools.constant import IS_SUDOER
 
 
 class GeneralFeatures:
@@ -60,7 +61,10 @@ class GeneralFeatures:
     def get_features(self):
         feature_dict = dict()
         for feature in self.features:
-            output = sp.getoutput(f"sudo lshw -class {feature}")
+            if IS_SUDOER:
+                output = sp.getoutput(f"sudo lshw -class {feature}")
+            else:
+                output = sp.getoutput(f"lshw -class {feature}")
             parsed_output = self.get_sub_values(output)
             for o in parsed_output:
                 for i, k in enumerate(o):
